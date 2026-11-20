@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GTA VI Trophy Guide &amp; Tracker — 55 PS5 trophies, offline</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23120e26'/%3E%3Ctext x='16' y='22' font-size='14' font-family='sans-serif' font-weight='bold' font-style='italic' text-anchor='middle' fill='%23ff3d8f'%3EVI%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <div class="logo" aria-hidden="true">VI</div>
+    <div>
+      <h1>GTA VI <span>Trophy Guide &amp; Tracker</span></h1>
+      <p class="sub">Grand Theft Auto VI · PlayStation 5 · all 55 trophies · fully offline <span id="demoBadge" class="demo-badge" hidden>demo progress</span></p>
+    </div>
+  </div>
+  <div class="progress">
+    <div class="progress-num">
+      <strong id="pct">0%</strong>
+      <span id="countLabel">0 / 55 earned</span>
+    </div>
+    <div class="bar" role="progressbar" aria-label="Overall trophy progress"><div id="barFill"></div></div>
+    <div class="grades" id="gradeChips"></div>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button id="tabTracker" class="tab active" type="button">Tracker</button>
+  <button id="tabRoadmap" class="tab" type="button">Road to Platinum</button>
+  <div class="tab-side">
+    <button id="btnExport" class="ghost" type="button" title="Download your progress as JSON">Export</button>
+    <button id="btnImport" class="ghost" type="button" title="Import progress from a file or pasted JSON">Import</button>
+    <button id="btnReset" class="ghost danger" type="button" title="Clear all earned trophies">Reset</button>
+  </div>
+</nav>
+
+<main>
+  <section id="viewTracker">
+    <div class="toolbar">
+      <input id="search" type="search" placeholder="Search trophies…" autocomplete="off" aria-label="Search trophies">
+      <select id="fGrade" aria-label="Filter by grade">
+        <option value="all">All grades</option>
+        <option value="platinum">Platinum</option>
+        <option value="gold">Gold</option>
+        <option value="silver">Silver</option>
+        <option value="bronze">Bronze</option>
+      </select>
+      <select id="fCategory" aria-label="Filter by category">
+        <option value="all">All categories</option>
+        <option value="story">Story</option>
+        <option value="mission">Missions</option>
+        <option value="missable">Missable</option>
+        <option value="collectible">Collectibles</option>
+        <option value="activity">Activities</option>
+        <option value="combat">Combat</option>
+        <option value="money">Money</option>
+        <option value="exploration">Exploration</option>
+      </select>
+      <select id="fStatus" aria-label="Filter by status">
+        <option value="all">All statuses</option>
+        <option value="earned">Earned</option>
+        <option value="remaining">Remaining</option>
+      </select>
+      <label class="switch" title="Hide story trophies (names, descriptions and guides) until you earn them"><input type="checkbox" id="fSpoiler"><span>Spoiler guard</span></label>
+      <label class="switch" title="Hide trophies you have already earned"><input type="checkbox" id="fHideEarned"><span>Hide earned</span></label>
+      <span id="resultCount" class="result-count"></span>
+    </div>
+    <div class="split">
+      <div id="list" class="list" aria-label="Trophy checklist"></div>
+      <aside id="detail" class="detail" aria-label="Trophy guide"></aside>
+    </div>
+  </section>
+
+  <section id="viewRoadmap" hidden>
+    <div id="roadmap" class="roadmap"></div>
+  </section>
+</main>
+
+<footer>
+  <p id="footNote"></p>
+</footer>
+
+<dialog id="importDialog">
+  <h2>Import progress</h2>
+  <p class="muted">Pick a previously exported JSON file, or paste its contents below. Accepts this app's export, a plain list of trophy ids, or the starter checklist's list of trophy names.</p>
+  <input type="file" id="importFile" accept=".json,application/json">
+  <textarea id="importText" rows="6" placeholder='{"earned":[2,3,8], …} or [2,3,8] or ["Trust", …]'></textarea>
+  <p id="importMsg" class="import-msg" role="status"></p>
+  <div class="dialog-actions">
+    <button id="importApply" class="primary" type="button">Apply</button>
+    <button id="importCancel" class="ghost" type="button">Cancel</button>
+  </div>
+</dialog>
+
+<script src="data/trophies.js"></script>
+<script src="src/state.js"></script>
+<script src="src/app.js"></script>
+</body>
+</html>
