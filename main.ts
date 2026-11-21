@@ -31,5 +31,5 @@ const dossier = buildDossier(outDir, {
 });
 
 writeFileSync(join(outDir, 'dossier.json'), dossier);
+console.log('dossier.json size on disk:', statSync(join(outDir, 'dossier.json')).size, 'bytes');
 console.log('wrote', join(outDir, 'dossier.json'));
-console.log('dossier.json is', statSync(join(outDir, 'dossier.json')).size, 'bytes on disk');

@@ -271,8 +271,8 @@
     $('viewRoadmap').hidden = tracker;
   }
 
-  // Repaints the whole view from current state: header progress/grade chips,
-  // the filtered trophy checklist, the selected trophy's detail panel, and the roadmap.
+  // Redraws the whole UI from the current state: progress header, filtered
+  // trophy list, the selected trophy's guide panel, and the roadmap phases.
   function render() {
     renderHeader();
     renderList();
