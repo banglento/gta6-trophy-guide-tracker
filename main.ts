@@ -7,7 +7,7 @@
 // see in app/ is exactly what the judge opens.
 //
 // Usage:  mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
-import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-frontend.ts';
@@ -32,3 +32,4 @@ const dossier = buildDossier(outDir, {
 
 writeFileSync(join(outDir, 'dossier.json'), dossier);
 console.log('wrote', join(outDir, 'dossier.json'));
+console.log('dossier.json is', statSync(join(outDir, 'dossier.json')).size, 'bytes on disk');

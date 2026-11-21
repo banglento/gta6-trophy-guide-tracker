@@ -271,6 +271,8 @@
     $('viewRoadmap').hidden = tracker;
   }
 
+  // Repaints the whole view from current state: header progress/grade chips,
+  // the filtered trophy checklist, the selected trophy's detail panel, and the roadmap.
   function render() {
     renderHeader();
     renderList();
