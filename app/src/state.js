@@ -1,32 +1,28 @@
-// state.js — progress storage for the GTA VI trophy tracker.
-// Real progress lives under 'gta6-trophy-guide-tracker:v1' in localStorage.
-// ?demo=1 uses a SEPARATE demo key and never touches the real one, so the
-// screenshots can show a seeded checklist without wiping anyone's progress.
+// Progress storage for the GTA VI trophy tracker (classic script).
+// Real progress lives under one localStorage key; ?demo=1 uses a separate
+// demo key and never touches the real one.
 (function () {
   'use strict';
 
-  var KEY = 'gta6-trophy-guide-tracker:v1';
+  var REAL_KEY = 'gta6-trophy-guide-tracker:v1';
   var DEMO_KEY = 'gta6-trophy-guide-tracker:demo';
   var DEMO_SEED = [2, 3, 4, 8, 19, 20, 21, 44];
 
-  var params = new URLSearchParams(location.search);
+  var params = new URLSearchParams(window.location.search);
   var demo = params.get('demo') === '1';
 
   function key() {
-    return demo ? DEMO_KEY : KEY;
-  }
-
-  function blankState() {
-    return { earned: [], settings: { spoiler: false, hideEarned: false } };
+    return demo ? DEMO_KEY : REAL_KEY;
   }
 
   function load(validIds) {
     var valid = {};
-    validIds.forEach(function (id) { valid[id] = true; });
-    var state = blankState();
-    try {
-      var raw = localStorage.getItem(key());
-      if (raw) {
+    (validIds || []).forEach(function (id) { valid[id] = true; });
+    var state = { earned: [], settings: { spoiler: false, hideEarned: false } };
+    var raw = null;
+    try { raw = window.localStorage.getItem(key()); } catch (e) { raw = null; }
+    if (raw) {
+      try {
         var parsed = JSON.parse(raw);
         if (parsed && Array.isArray(parsed.earned)) {
           state.earned = parsed.earned.filter(function (id) { return valid[id]; });
@@ -35,29 +31,24 @@
           state.settings.spoiler = !!parsed.settings.spoiler;
           state.settings.hideEarned = !!parsed.settings.hideEarned;
         }
-      } else if (demo) {
-        // First demo visit: seed the demo checklist so screenshots show progress.
-        state.earned = DEMO_SEED.filter(function (id) { return valid[id]; });
-        save(state);
-      }
-    } catch (e) {
-      // Corrupt or unavailable storage: start clean, never crash the page.
-      state = blankState();
+      } catch (e) { /* corrupt stored data: start clean */ }
+    } else if (demo) {
+      // Fresh demo run: seed a little progress so the tracker shows its shape.
+      state.earned = DEMO_SEED.filter(function (id) { return valid[id]; });
+      save(state);
     }
-    state.earned = state.earned.slice().sort(function (a, b) { return a - b; });
+    state.earned.sort(function (a, b) { return a - b; });
     return state;
   }
 
   function save(state) {
     try {
-      localStorage.setItem(key(), JSON.stringify({
-        earned: state.earned.slice().sort(function (a, b) { return a - b; }),
-        settings: state.settings,
+      window.localStorage.setItem(key(), JSON.stringify({
+        earned: (state.earned || []).slice().sort(function (a, b) { return a - b; }),
+        settings: state.settings || {},
         updated: new Date().toISOString()
       }));
-    } catch (e) {
-      // Storage full or blocked (private mode): progress just won't persist.
-    }
+    } catch (e) { /* storage unavailable: progress just won't persist */ }
   }
 
   function exportPayload(state) {
@@ -65,47 +56,51 @@
       app: 'gta6-trophy-guide-tracker',
       version: 1,
       exportedAt: new Date().toISOString(),
-      earned: state.earned.slice().sort(function (a, b) { return a - b; }),
-      settings: state.settings
+      earned: (state.earned || []).slice().sort(function (a, b) { return a - b; }),
+      settings: state.settings || {}
     };
   }
 
-  // Accept three shapes: the app's own export, a bare id array, or a name
-  // array (the starter checklist's trophy names). Returns the earned ids
-  // sorted, how many entries were skipped, and the settings if present.
   function parseImport(text, trophies) {
-    var parsed;
-    try {
-      parsed = JSON.parse(text);
-    } catch (e) {
-      throw new Error('That is not valid JSON. Paste the app\'s export, a list of ids like [2,3,8], or a list of names like ["Trust"].');
-    }
-    var list = null;
-    var settings = null;
-    if (parsed && Array.isArray(parsed.earned)) {
-      list = parsed.earned;
-      if (parsed.settings) settings = parsed.settings;
-    } else if (Array.isArray(parsed)) {
-      list = parsed;
-    }
-    if (!list) {
-      throw new Error('No "earned" array found in that JSON.');
-    }
     var byId = {};
     var byName = {};
     trophies.forEach(function (t) {
       byId[t.id] = true;
       byName[t.name.toLowerCase()] = t.id;
     });
+
+    var data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      throw new Error('That is not valid JSON. Paste the app\'s export, a plain id list, or a name list.');
+    }
+
+    var rawIds = null;
+    var settings = null;
+    if (data && Array.isArray(data.earned)) {
+      rawIds = data.earned;
+      settings = data.settings || null;
+    } else if (Array.isArray(data)) {
+      rawIds = data;
+    } else {
+      throw new Error('No "earned" array found in that JSON.');
+    }
+
     var earned = [];
     var skipped = 0;
-    list.forEach(function (entry) {
+    rawIds.forEach(function (item) {
       var id = null;
-      if (typeof entry === 'number' && byId[entry]) id = entry;
-      else if (typeof entry === 'string' && byName[entry.toLowerCase()] !== undefined) id = byName[entry.toLowerCase()];
-      if (id === null) { skipped++; return; }
-      if (earned.indexOf(id) === -1) earned.push(id);
+      if (typeof item === 'number') id = item;
+      else if (typeof item === 'string') {
+        var trimmed = item.trim();
+        if (/^\d+$/.test(trimmed)) id = parseInt(trimmed, 10);
+        else if (byName[trimmed.toLowerCase()] !== undefined) id = byName[trimmed.toLowerCase()];
+      }
+      if (id !== null && byId[id] && earned.indexOf(id) === -1) earned.push(id);
+      else skipped += 1;
     });
+
     earned.sort(function (a, b) { return a - b; });
     return { earned: earned, skipped: skipped, settings: settings };
   }

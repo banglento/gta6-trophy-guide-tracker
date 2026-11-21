@@ -1,357 +1,427 @@
-// app.js — UI logic for the GTA VI trophy tracker. Classic script, no modules.
-// All data comes from window.GTA6_DATA; nothing is fetched at run time.
+// UI logic for the GTA VI trophy tracker (classic script, no modules).
+// All data comes from window.GTA6_DATA; no network at run time.
 (function () {
   'use strict';
 
   var DATA = window.GTA6_DATA;
-  var TROPHIES = DATA.trophies;
-  var BY_ID = {};
-  TROPHIES.forEach(function (t) { BY_ID[t.id] = t; });
+  var trophies = DATA.trophies;
+  var byId = {};
+  trophies.forEach(function (t) { byId[t.id] = t; });
 
-  var state = Store.load(TROPHIES.map(function (t) { return t.id; }));
-  var earned = new Set(state.earned);
-  var selectedId = null;
+  var state = window.Store.load(trophies.map(function (t) { return t.id; }));
+  var currentId = null;
+  var filters = { q: '', grade: 'all', category: 'all', status: 'all' };
 
   var $ = function (id) { return document.getElementById(id); };
-  var listEl = $('list'), detailEl = $('detail'), roadmapEl = $('roadmap');
 
   function esc(s) {
-    return String(s).replace(/[&<>"']/g, function (c) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-    });
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
-  function isHidden(t) {
-    return state.settings.spoiler && t.spoiler && !earned.has(t.id);
+  function isEarned(id) { return state.earned.indexOf(id) !== -1; }
+
+  function isSpoilerHidden(t) {
+    return state.settings.spoiler && t.spoiler && !isEarned(t.id);
+  }
+
+  function displayName(t) { return isSpoilerHidden(t) ? '???' : t.name; }
+  function displayDesc(t) {
+    return isSpoilerHidden(t)
+      ? 'Story trophy — hidden until earned (spoiler guard).'
+      : t.description;
   }
 
   function gradeLabel(g) {
     return g.charAt(0).toUpperCase() + g.slice(1);
   }
 
-  // Compact count label: "$250k" style for dollars, plain number otherwise.
-  function compactCount(t) {
-    if (t.count_unit === '$') return t.count >= 1000 ? '$' + (t.count / 1000) + 'k' : '$' + t.count;
+  function countLabel(t) {
+    if (t.count === undefined || t.count === null) return null;
+    if (t.count_unit === '$') {
+      return t.count >= 1000 ? '$' + (t.count / 1000) + 'k' : '$' + t.count;
+    }
     if (t.count_unit === '%') return t.count + '%';
     return String(t.count);
   }
 
-  // Compact count chip: "$250k" style for dollars, plain number otherwise.
+  function countTitle(t) {
+    var s = 'Target: ' + countLabel(t);
+    if (t.count_note) s += ' — ' + t.count_note;
+    return s;
+  }
+
+  function gradeBadge(t) {
+    return '<span class="badge grade-' + t.grade + '">' + gradeLabel(t.grade) + '</span>';
+  }
+
   function countChip(t) {
-    if (t.count === undefined || t.count === null) return '';
-    var label = compactCount(t);
-    var target = t.count_unit === '$' ? '$' + t.count.toLocaleString('en-US')
-      : t.count_unit === '%' ? t.count + '%'
-      : String(t.count);
-    var title = 'Target: ' + target;
-    if (t.count_note) title += ' — ' + t.count_note;
-    return '<span class="tag count" title="' + esc(title) + '">' + esc(label) + '</span>';
+    var label = countLabel(t);
+    if (label === null) return '';
+    return '<span class="tag count" title="' + esc(countTitle(t)) + '">× ' + esc(label) + '</span>';
   }
 
-  function save() {
-    state.earned = Array.from(earned).sort(function (a, b) { return a - b; });
-    Store.save(state);
-  }
-
-  function toggle(id) {
-    if (earned.has(id)) earned.delete(id); else earned.add(id);
-    save();
-    render();
+  function missableFlag(t) {
+    if (!t.missable) return '';
+    return '<span class="tag missable" title="' + esc(t.missable_note) + '">&#9873; missable</span>';
   }
 
   // ---------- header ----------
+
   function renderHeader() {
-    var total = TROPHIES.length;
-    var n = earned.size;
-    var pct = Math.round((n / total) * 100);
-    $('pct').textContent = pct + '%';
-    $('countLabel').textContent = n + ' / ' + total + ' earned';
-    $('barFill').style.width = pct + '%';
+    var earned = state.earned.length;
+    var total = trophies.length;
+    $('pct').textContent = Math.round((earned / total) * 100) + '%';
+    $('countLabel').textContent = earned + ' / ' + total + ' earned';
+    $('barFill').style.width = (earned / total) * 100 + '%';
     var order = ['platinum', 'gold', 'silver', 'bronze'];
     $('gradeChips').innerHTML = order.map(function (g) {
-      var all = TROPHIES.filter(function (t) { return t.grade === g; });
-      var got = all.filter(function (t) { return earned.has(t.id); }).length;
-      return '<span class="chip grade-' + g + '"><i class="dot"></i>' +
-        esc(gradeLabel(g)) + ' ' + got + '/' + all.length + '</span>';
+      var all = trophies.filter(function (t) { return t.grade === g; });
+      var got = all.filter(function (t) { return isEarned(t.id); }).length;
+      return '<span class="chip"><span class="dot dot-' + g + '"></span>' +
+        gradeLabel(g) + ' ' + got + '/' + all.length + '</span>';
     }).join('');
-    $('demoBadge').hidden = !Store.demo;
+    $('demoBadge').hidden = !window.Store.demo;
   }
 
-  // ---------- filters ----------
-  function filtered() {
-    var q = $('search').value.trim().toLowerCase();
-    var grade = $('fGrade').value;
-    var cat = $('fCategory').value;
-    var status = $('fStatus').value;
-    return TROPHIES.filter(function (t) {
-      var hidden = isHidden(t);
-      if (grade !== 'all' && t.grade !== grade) return false;
-      if (cat === 'missable') { if (!t.missable) return false; }
-      else if (cat !== 'all' && t.category !== cat) return false;
-      if (status === 'earned' && !earned.has(t.id)) return false;
-      if (status === 'remaining' && earned.has(t.id)) return false;
-      if (state.settings.hideEarned && earned.has(t.id)) return false;
+  // ---------- checklist ----------
+
+  function visibleTrophies() {
+    var q = filters.q.trim().toLowerCase();
+    return trophies.filter(function (t) {
+      if (filters.grade !== 'all' && t.grade !== filters.grade) return false;
+      if (filters.category !== 'all') {
+        if (filters.category === 'missable') { if (!t.missable) return false; }
+        else if (t.category !== filters.category) return false;
+      }
+      if (filters.status === 'earned' && !isEarned(t.id)) return false;
+      if (filters.status === 'remaining' && isEarned(t.id)) return false;
+      if (state.settings.hideEarned && isEarned(t.id)) return false;
       if (q) {
         var hay = (t.name + ' ' + t.description + ' ' + t.id).toLowerCase();
-        if (!hidden) hay += ' ' + (t.guide || '').toLowerCase();
+        if (!isSpoilerHidden(t)) hay += ' ' + (t.guide || '').toLowerCase();
         if (hay.indexOf(q) === -1) return false;
       }
       return true;
     });
   }
 
-  // ---------- checklist ----------
   function rowHtml(t) {
-    var hidden = isHidden(t);
-    var got = earned.has(t.id);
-    var name = hidden ? '???' : t.name;
-    var desc = hidden ? 'Story trophy — hidden until earned (spoiler guard).' : t.description;
-    var tags = '<span class="tag cat">' + esc(t.category) + '</span>';
-    if (!hidden) {
-      if (t.missable) tags += ' <span class="tag missable" title="' + esc(t.missable_note) + '">⚑ missable</span>';
-      tags += ' ' + countChip(t);
-    }
-    return '<div class="row' + (got ? ' earned' : '') + (selectedId === t.id ? ' selected' : '') +
-      '" role="listitem" data-id="' + t.id + '">' +
-      '<input type="checkbox" class="row-check" ' + (got ? 'checked' : '') +
-      ' aria-label="Mark ' + esc(name) + ' earned">' +
-      '<div class="row-main"><div class="row-top"><span class="row-name">' + esc(name) + '</span>' +
-      ' <span class="badge grade-' + t.grade + '">' + esc(gradeLabel(t.grade)) + '</span></div>' +
-      '<div class="row-desc">' + esc(desc) + '</div>' +
-      '<div class="row-tags">' + tags + '</div></div></div>';
+    var earned = isEarned(t.id);
+    var cls = 'row' + (earned ? ' earned' : '') + (t.id === currentId ? ' selected' : '');
+    return '<div class="' + cls + '" data-id="' + t.id + '" role="listitem">' +
+      '<input type="checkbox" class="row-check" ' + (earned ? 'checked' : '') +
+      ' aria-label="Mark ' + esc(displayName(t)) + ' earned">' +
+      '<div class="row-main">' +
+      '<div class="row-top"><span class="row-name">' + esc(displayName(t)) + '</span> ' +
+      gradeBadge(t) +
+      ' <span class="tag cat">' + esc(t.category) + '</span> ' +
+      missableFlag(t) + countChip(t) + '</div>' +
+      '<div class="row-desc">' + esc(displayDesc(t)) + '</div>' +
+      '</div></div>';
   }
 
   function renderList() {
-    var rows = filtered();
-    listEl.innerHTML = rows.map(rowHtml).join('') ||
-      '<p class="empty">No trophies match these filters.</p>';
-    $('resultCount').textContent = 'Showing ' + rows.length + ' of ' + TROPHIES.length;
-    listEl.querySelectorAll('.row').forEach(function (row) {
-      var id = Number(row.dataset.id);
-      row.addEventListener('click', function () { openGuide(id); });
-      row.querySelector('.row-check').addEventListener('click', function (e) {
-        e.stopPropagation();
-        toggle(id);
-      });
-    });
+    var list = visibleTrophies();
+    $('list').innerHTML = list.length
+      ? list.map(rowHtml).join('')
+      : '<p class="empty">No trophies match these filters.</p>';
+    $('resultCount').textContent = 'Showing ' + list.length + ' of 55';
   }
 
   // ---------- detail panel ----------
-  function sourceHtml(s) {
-    if (s.url) return '<li><a href="' + esc(s.url) + '" target="_blank" rel="noopener">' + esc(s.name) + '</a></li>';
-    return '<li>' + esc(s.name) + ' <span class="named-hint" title="Cited by name — this app does not invent article URLs it has not seen.">(named guide)</span></li>';
+
+  function detailHtml(t) {
+    var hidden = isSpoilerHidden(t);
+    var earned = isEarned(t.id);
+    var html = '<div class="detail-head"><h2>' + esc(displayName(t)) + '</h2>' +
+      '<button id="detailClose" class="ghost" type="button" aria-label="Close guide">&times;</button></div>' +
+      '<div class="detail-tags">' + gradeBadge(t) +
+      ' <span class="tag cat">' + esc(t.category) + '</span> ' +
+      missableFlag(t) + countChip(t) +
+      (hidden ? ' <span class="tag spoiler-tag">spoiler guarded</span>' : '') +
+      '</div>';
+
+    html += '<div class="detail-sec"><div class="detail-label">Official description</div>' +
+      '<p class="official">' + esc(displayDesc(t)) + '</p></div>';
+
+    if (hidden) {
+      html += '<div class="detail-sec"><div class="detail-label">Guide</div>' +
+        '<div class="note-box warn">Spoiler guarded — this story trophy is hidden until you earn it. ' +
+        'Turn the spoiler guard off, or tick it earned, to reveal the guide.</div></div>';
+    } else {
+      html += '<div class="detail-sec"><div class="detail-label">Guide</div>' +
+        '<p class="guide-text">' + esc(t.guide) + '</p>' +
+        (t.count_note ? '<p class="count-note">Target note: ' + esc(t.count_note) + '</p>' : '') +
+        '</div>';
+    }
+
+    html += '<div class="detail-sec"><div class="detail-label">Missable?</div>' +
+      '<div class="note-box' + (t.missable ? ' warn' : '') + '">' + esc(t.missable_note) + '</div></div>';
+
+    html += '<div class="detail-sec"><div class="detail-label">Sources</div><ul class="sources">' +
+      t.sources.map(function (s) {
+        if (s.url) {
+          return '<li><a href="' + esc(s.url) + '" target="_blank" rel="noopener">' + esc(s.name) + '</a></li>';
+        }
+        return '<li><span title="Cited by name — this app does not invent article URLs it has not seen.">' +
+          esc(s.name) + ' <em>(named guide)</em></span></li>';
+      }).join('') + '</ul></div>';
+
+    var idx = visibleTrophies().map(function (x) { return x.id; });
+    var pos = idx.indexOf(t.id);
+    html += '<div class="detail-actions">' +
+      '<button id="detailToggle" class="primary" type="button">' + (earned ? 'Unmark earned' : 'Mark earned') + '</button>' +
+      '<button id="detailPrev" class="ghost" type="button"' + (pos <= 0 ? ' disabled' : '') + '>&larr; Prev</button>' +
+      '<button id="detailNext" class="ghost" type="button"' + (pos < 0 || pos >= idx.length - 1 ? ' disabled' : '') + '>Next &rarr;</button>' +
+      '</div>';
+    return html;
   }
 
   function renderDetail() {
-    if (selectedId === null || !BY_ID[selectedId]) {
-      detailEl.innerHTML = '<p class="detail-hint">Pick a trophy from the list to read its guide — official description, how to earn it, and where the facts come from.</p>';
+    var el = $('detail');
+    if (!currentId || !byId[currentId]) {
+      el.innerHTML = '<p class="detail-empty">Pick a trophy on the left to see its guide, sources and missable notes here.</p>' +
+        '<p class="detail-empty">55 trophies &middot; 8 missable in the moment &middot; 5 phases to the platinum. ' +
+        'The Road to Platinum tab lays out the order.</p>';
       return;
     }
-    var t = BY_ID[selectedId];
-    var hidden = isHidden(t);
-    var got = earned.has(t.id);
-    var name = hidden ? '???' : t.name;
-    var tags = '<span class="tag cat">' + esc(t.category) + '</span>' +
-      ' <span class="badge grade-' + t.grade + '">' + esc(gradeLabel(t.grade)) + '</span>';
-    if (t.missable) tags += ' <span class="tag missable" title="' + esc(t.missable_note) + '">⚑ missable</span>';
-    if (!hidden) tags += ' ' + countChip(t);
-    if (hidden) tags += ' <span class="tag spoiler-tag">spoiler guarded</span>';
-
-    var guideHtml;
-    if (hidden) {
-      guideHtml = '<div class="locked">This is a story trophy. Turn off the spoiler guard, or mark it earned, to read the guide.</div>';
-    } else {
-      var note = t.count_note ? '<p class="count-note">' + esc(t.count_note) + '</p>' : '';
-      guideHtml = '<p>' + esc(t.guide) + '</p>' + note;
-    }
-
-    var idx = TROPHIES.indexOf(t);
-    var prev = TROPHIES[(idx - 1 + TROPHIES.length) % TROPHIES.length];
-    var next = TROPHIES[(idx + 1) % TROPHIES.length];
-
-    detailEl.innerHTML =
-      '<div class="detail-head"><h2>' + esc(name) + '</h2>' +
-      '<button id="detailClose" class="ghost" type="button" aria-label="Close guide">✕</button></div>' +
-      '<div class="detail-tags">' + tags + '</div>' +
-      '<h3>Official description</h3>' +
-      '<blockquote>' + esc(hidden ? 'Story trophy — hidden until earned (spoiler guard).' : t.description) + '</blockquote>' +
-      '<h3>Guide</h3>' + guideHtml +
-      '<h3>Missable?</h3>' +
-      '<div class="note-box' + (t.missable ? ' warn' : '') + '">' + esc(t.missable_note) + '</div>' +
-      '<h3>Sources</h3><ul class="sources">' + t.sources.map(sourceHtml).join('') + '</ul>' +
-      '<div class="detail-actions">' +
-      '<button id="detailToggle" class="primary" type="button">' + (got ? 'Unmark earned' : 'Mark earned') + '</button>' +
-      '<button id="detailPrev" class="ghost" type="button">← Prev</button>' +
-      '<button id="detailNext" class="ghost" type="button">Next →</button>' +
-      '</div>';
-    $('detailClose').addEventListener('click', function () { selectedId = null; renderDetail(); renderList(); });
-    $('detailToggle').addEventListener('click', function () { toggle(t.id); });
-    $('detailPrev').addEventListener('click', function () { openGuide(prev.id); });
-    $('detailNext').addEventListener('click', function () { openGuide(next.id); });
-  }
-
-  function openGuide(id) {
-    selectedId = id;
-    setTab('tracker');
-    renderList();
-    renderDetail();
-    // On narrow screens the detail panel sits below the list; bring it into
-    // view only when it is entirely off-screen, so the header and filters
-    // stay visible on desktop (and in screenshots).
-    var rect = detailEl.getBoundingClientRect();
-    if (rect.top > window.innerHeight) detailEl.scrollIntoView();
+    el.innerHTML = detailHtml(byId[currentId]);
+    $('detailClose').addEventListener('click', function () {
+      currentId = null;
+      render();
+    });
+    $('detailToggle').addEventListener('click', function () {
+      toggle(currentId);
+    });
+    var prev = $('detailPrev');
+    var next = $('detailNext');
+    if (prev) prev.addEventListener('click', function () {
+      var idx = visibleTrophies().map(function (x) { return x.id; });
+      var pos = idx.indexOf(currentId);
+      if (pos > 0) openGuide(idx[pos - 1]);
+    });
+    if (next) next.addEventListener('click', function () {
+      var idx = visibleTrophies().map(function (x) { return x.id; });
+      var pos = idx.indexOf(currentId);
+      if (pos >= 0 && pos < idx.length - 1) openGuide(idx[pos + 1]);
+    });
   }
 
   // ---------- roadmap ----------
+
   function renderRoadmap() {
-    var html = '<div class="roadmap-intro"><p><strong>Road to Platinum · 55 trophies · 5 phases.</strong></p>' +
+    var html = '<div class="roadmap-intro">' +
+      '<strong>Road to Platinum &middot; 55 trophies &middot; 5 phases.</strong>' +
       '<p>' + esc(DATA.notes.missables) + '</p>' +
       '<p>' + esc(DATA.notes.honesty) + '</p></div>';
+
     DATA.roadmap.forEach(function (phase) {
-      var phaseTrophies = phase.ids.map(function (id) { return BY_ID[id]; });
-      var got = phaseTrophies.filter(function (t) { return earned.has(t.id); }).length;
-      var chips = phaseTrophies.map(function (t) {
-        var hidden = isHidden(t);
-        var label = hidden ? '???' : t.name;
-        var count = (!hidden && t.count !== undefined && t.count !== null) ? ' ×' + compactCount(t) : '';
-        return '<button type="button" class="phase-chip' + (earned.has(t.id) ? ' earned' : '') +
-          '" data-id="' + t.id + '"><i class="dot grade-' + t.grade + '"></i>' +
-          esc(label) + esc(count) + '</button>';
-      }).join('');
-      html += '<article class="phase"><div class="phase-num">' + phase.phase + '</div>' +
-        '<div class="phase-body"><div class="phase-head"><h3>' + esc(phase.title) + '</h3>' +
-        '<span class="phase-count">' + got + ' / ' + phaseTrophies.length + ' earned</span></div>' +
-        '<p>' + esc(phase.blurb) + '</p><div class="phase-chips">' + chips + '</div></div></article>';
+      var got = phase.ids.filter(function (id) { return isEarned(id); }).length;
+      html += '<article class="phase"><div class="phase-head">' +
+        '<span class="phase-num">' + phase.phase + '</span>' +
+        '<div><h3>' + esc(phase.title) + '</h3>' +
+        '<span class="phase-count">' + got + ' / ' + phase.ids.length + ' earned</span></div></div>' +
+        '<p class="phase-blurb">' + esc(phase.blurb) + '</p>' +
+        '<div class="phase-chips">' + phase.ids.map(function (id) {
+          var t = byId[id];
+          var label = countLabel(t);
+          return '<button type="button" class="tchip' + (isEarned(id) ? ' earned' : '') + '" data-id="' + id + '">' +
+            '<span class="dot dot-' + t.grade + '"></span>' +
+            '<span class="tchip-name">' + esc(displayName(t)) + '</span>' +
+            (label !== null ? '<span class="tchip-count">&times; ' + esc(label) + '</span>' : '') +
+            '</button>';
+        }).join('') + '</div></article>';
     });
-    html += '<article class="phase capstone"><div class="phase-num">★</div>' +
-      '<div class="phase-body"><div class="phase-head"><h3>The Platinum</h3></div>' +
-      '<p>“Vice Got a Price!” unlocks automatically once the other 54 trophies are earned. ' +
-      'When every phase above reads complete, the platinum is yours — Leonida Legend.</p></div></article>';
-    roadmapEl.innerHTML = html;
-    roadmapEl.querySelectorAll('.phase-chip').forEach(function (chip) {
-      chip.addEventListener('click', function () { openGuide(Number(chip.dataset.id)); });
-    });
+
+    html += '<article class="phase platinum-card"><div class="phase-head">' +
+      '<span class="phase-num plat-star">&#9733;</span>' +
+      '<div><h3>The Platinum</h3></div></div>' +
+      '<p class="phase-blurb">Vice Got a Price! unlocks automatically once the other 54 trophies are earned. ' +
+      'When every phase above reads complete, the platinum is yours — Leonida Legend.</p></article>';
+
+    $('roadmap').innerHTML = html;
   }
 
-  // ---------- tabs ----------
-  function setTab(which) {
-    $('tabTracker').classList.toggle('active', which === 'tracker');
-    $('tabRoadmap').classList.toggle('active', which === 'roadmap');
-    $('viewTracker').hidden = which !== 'tracker';
-    $('viewRoadmap').hidden = which !== 'roadmap';
-    if (which === 'roadmap') renderRoadmap();
+  // ---------- actions ----------
+
+  function toggle(id) {
+    var i = state.earned.indexOf(id);
+    if (i === -1) state.earned.push(id);
+    else state.earned.splice(i, 1);
+    state.earned.sort(function (a, b) { return a - b; });
+    window.Store.save(state);
+    render();
+  }
+
+  function openGuide(id) {
+    if (!byId[id]) return;
+    currentId = id;
+    setTab('tracker');
+    render();
+    var row = document.querySelector('.row[data-id="' + id + '"]');
+    if (row) row.scrollIntoView({ block: 'nearest' });
+  }
+
+  function setTab(name) {
+    var tracker = name === 'tracker';
+    $('tabTracker').classList.toggle('active', tracker);
+    $('tabRoadmap').classList.toggle('active', !tracker);
+    $('viewTracker').hidden = !tracker;
+    $('viewRoadmap').hidden = tracker;
   }
 
   function render() {
     renderHeader();
     renderList();
     renderDetail();
-    if (!$('viewRoadmap').hidden) renderRoadmap();
+    renderRoadmap();
   }
 
-  // ---------- export / import / reset ----------
   function download(filename, text) {
     var blob = new Blob([text], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
     var a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
+    a.href = url;
     a.download = filename;
     document.body.appendChild(a);
     a.click();
-    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
   }
 
-  $('btnExport').addEventListener('click', function () {
-    download('gta6-trophy-progress.json', JSON.stringify(Store.exportPayload(state), null, 2));
+  // ---------- wire up ----------
+
+  $('fSpoiler').checked = !!state.settings.spoiler;
+  $('fHideEarned').checked = !!state.settings.hideEarned;
+
+  $('search').addEventListener('input', function (e) {
+    filters.q = e.target.value;
+    renderList();
+  });
+  $('fGrade').addEventListener('change', function (e) {
+    filters.grade = e.target.value;
+    renderList();
+  });
+  $('fCategory').addEventListener('change', function (e) {
+    filters.category = e.target.value;
+    renderList();
+  });
+  $('fStatus').addEventListener('change', function (e) {
+    filters.status = e.target.value;
+    renderList();
+  });
+  $('fSpoiler').addEventListener('change', function (e) {
+    state.settings.spoiler = e.target.checked;
+    window.Store.save(state);
+    render();
+  });
+  $('fHideEarned').addEventListener('change', function (e) {
+    state.settings.hideEarned = e.target.checked;
+    window.Store.save(state);
+    render();
   });
 
-  var importDialog = $('importDialog');
-  $('btnImport').addEventListener('click', function () {
-    $('importText').value = '';
-    $('importMsg').textContent = '';
-    importDialog.showModal();
+  $('list').addEventListener('click', function (e) {
+    var row = e.target.closest('.row');
+    if (!row) return;
+    var id = parseInt(row.getAttribute('data-id'), 10);
+    if (e.target.classList.contains('row-check')) return; // change handler toggles
+    openGuide(id);
   });
-  $('importCancel').addEventListener('click', function () { importDialog.close(); });
-  $('importFile').addEventListener('change', function () {
-    var file = $('importFile').files[0];
+  $('list').addEventListener('change', function (e) {
+    if (e.target.classList.contains('row-check')) {
+      var row = e.target.closest('.row');
+      toggle(parseInt(row.getAttribute('data-id'), 10));
+    }
+  });
+
+  $('tabTracker').addEventListener('click', function () { setTab('tracker'); });
+  $('tabRoadmap').addEventListener('click', function () { setTab('roadmap'); });
+
+  $('roadmap').addEventListener('click', function (e) {
+    var chip = e.target.closest('.tchip');
+    if (!chip) return;
+    openGuide(parseInt(chip.getAttribute('data-id'), 10));
+  });
+
+  $('btnExport').addEventListener('click', function () {
+    download('gta6-trophy-progress.json',
+      JSON.stringify(window.Store.exportPayload(state), null, 2));
+  });
+
+  var dialog = $('importDialog');
+  $('btnImport').addEventListener('click', function () {
+    $('importMsg').textContent = '';
+    $('importText').value = '';
+    $('importFile').value = '';
+    if (typeof dialog.showModal === 'function') dialog.showModal();
+  });
+  $('importCancel').addEventListener('click', function () { dialog.close(); });
+  $('importFile').addEventListener('change', function (e) {
+    var file = e.target.files && e.target.files[0];
     if (!file) return;
     var reader = new FileReader();
-    reader.onload = function () { $('importText').value = String(reader.result); };
+    reader.onload = function () { $('importText').value = String(reader.result || ''); };
     reader.readAsText(file);
   });
   $('importApply').addEventListener('click', function () {
     try {
-      var result = Store.parseImport($('importText').value, TROPHIES);
-      earned = new Set(result.earned);
+      var result = window.Store.parseImport($('importText').value, trophies);
+      state.earned = result.earned;
       if (result.settings) {
         state.settings.spoiler = !!result.settings.spoiler;
         state.settings.hideEarned = !!result.settings.hideEarned;
         $('fSpoiler').checked = state.settings.spoiler;
         $('fHideEarned').checked = state.settings.hideEarned;
       }
-      save();
+      window.Store.save(state);
       render();
-      $('importMsg').textContent = 'Imported ' + result.earned.length + ' earned trophies' +
-        (result.skipped ? ' (' + result.skipped + ' entries skipped)' : '') + '.';
-      setTimeout(function () { importDialog.close(); }, 900);
-    } catch (e) {
-      $('importMsg').textContent = e.message;
+      $('importMsg').textContent = 'Imported ' + result.earned.length +
+        ' trophies' + (result.skipped ? ' (' + result.skipped + ' skipped).' : '.');
+      setTimeout(function () { dialog.close(); }, 900);
+    } catch (err) {
+      $('importMsg').textContent = err.message;
     }
   });
 
   $('btnReset').addEventListener('click', function () {
-    if (confirm('Clear all earned trophies and settings?')) {
-      earned = new Set();
-      state.settings = { spoiler: false, hideEarned: false };
-      $('fSpoiler').checked = false;
-      $('fHideEarned').checked = false;
-      selectedId = null;
-      save();
+    if (window.confirm('Clear all saved progress? This cannot be undone.')) {
+      state.earned = [];
+      window.Store.save(state);
       render();
     }
   });
 
-  // ---------- toolbar ----------
-  $('search').addEventListener('input', renderList);
-  $('fGrade').addEventListener('change', renderList);
-  $('fCategory').addEventListener('change', renderList);
-  $('fStatus').addEventListener('change', renderList);
-  $('fSpoiler').addEventListener('change', function () {
-    state.settings.spoiler = $('fSpoiler').checked;
-    save();
-    render();
-  });
-  $('fHideEarned').addEventListener('change', function () {
-    state.settings.hideEarned = $('fHideEarned').checked;
-    save();
-    render();
-  });
-  $('tabTracker').addEventListener('click', function () { setTab('tracker'); });
-  $('tabRoadmap').addEventListener('click', function () { setTab('roadmap'); });
-
-  // ---------- footer ----------
   $('footNote').textContent = DATA.notes.missables +
     ' Sources: official list via Exophase; PSNProfiles and PowerPyx guides cited by name.' +
     ' Progress is saved locally in your browser (localStorage) — nothing is sent anywhere.';
 
-  // ---------- init ----------
-  $('fSpoiler').checked = state.settings.spoiler;
-  $('fHideEarned').checked = state.settings.hideEarned;
+  // ---------- screenshot modes ----------
 
-  var shot = Store.params.get('shot');
+  var shot = window.Store.params.get('shot');
   if (shot === 'spoiler') {
     state.settings.spoiler = true;
     $('fSpoiler').checked = true;
-    save();
+    window.Store.save(state);
   }
-  render();
   if (shot === 'roadmap') {
     setTab('roadmap');
     document.body.classList.add('shot-full');
-  } else if (shot === 'guide') {
-    var id = Number(Store.params.get('id')) || 17;
-    if (BY_ID[id]) openGuide(id);
+  }
+  if (shot === 'guide') {
+    var gid = parseInt(window.Store.params.get('id') || '17', 10);
+    if (byId[gid]) currentId = gid;
   }
 
-  window.__app = { state: state, earned: earned, openGuide: openGuide, setTab: setTab, toggle: toggle, render: render };
+  render();
+  window.__app = {
+    state: state,
+    earned: state.earned,
+    openGuide: openGuide,
+    setTab: setTab,
+    toggle: toggle,
+    render: render
+  };
   window.__shotReady = true;
 })();

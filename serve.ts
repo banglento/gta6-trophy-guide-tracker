@@ -1,16 +1,14 @@
-// serve.ts — a tiny static server for app/ (Node 22, standard library only).
-// Usage: node serve.ts [--port 8080]  — serves app/ on http://localhost:8080
+// Tiny static server for the trophy guide app: serves app/ on localhost.
+// Usage: node serve.ts [--port 8080]
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
-import { extname, join, normalize, resolve } from 'node:path';
+import { createReadStream, existsSync, statSync } from 'node:fs';
+import { join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = resolve(fileURLToPath(new URL('.', import.meta.url)), 'app');
+const root = join(fileURLToPath(new URL('.', import.meta.url)), 'app');
 const args = process.argv.slice(2);
-let port = 8080;
 const portIdx = args.indexOf('--port');
-if (portIdx !== -1 && args[portIdx + 1]) port = Number(args[portIdx + 1]);
+const port = portIdx !== -1 ? parseInt(args[portIdx + 1], 10) || 8080 : 8080;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -28,34 +26,29 @@ const MIME = {
   '.webmanifest': 'application/manifest+json',
 };
 
-const server = createServer(async (req, res) => {
-  try {
-    const url = new URL(req.url || '/', 'http://localhost');
-    let rel = decodeURIComponent(url.pathname);
-    if (rel === '/') rel = '/index.html';
-    const filePath = resolve(join(root, normalize(rel)));
-    if (!filePath.startsWith(root + '/') && filePath !== root) {
-      res.writeHead(403, { 'content-type': 'text/plain' });
-      res.end('Forbidden\n');
-      return;
-    }
-    if (!existsSync(filePath)) {
-      res.writeHead(404, { 'content-type': 'text/plain' });
-      res.end('Not found\n');
-      return;
-    }
-    const body = await readFile(filePath);
-    res.writeHead(200, {
-      'content-type': MIME[extname(filePath)] || 'application/octet-stream',
-      'cache-control': 'no-store',
-    });
-    res.end(body);
-  } catch (err) {
-    res.writeHead(500, { 'content-type': 'text/plain' });
-    res.end('Server error\n');
+const server = createServer((req, res) => {
+  const url = new URL(req.url || '/', 'http://localhost');
+  let pathname = decodeURIComponent(url.pathname);
+  if (pathname === '/') pathname = '/index.html';
+  const file = resolve(join(root, normalize(pathname)));
+  if (!file.startsWith(resolve(root) + '/') && file !== resolve(root)) {
+    res.writeHead(403, { 'content-type': 'text/plain' });
+    res.end('403 forbidden\n');
+    return;
   }
+  if (!existsSync(file) || !statSync(file).isFile()) {
+    res.writeHead(404, { 'content-type': 'text/plain' });
+    res.end('404 not found\n');
+    return;
+  }
+  const ext = file.slice(file.lastIndexOf('.'));
+  res.writeHead(200, {
+    'content-type': MIME[ext] || 'application/octet-stream',
+    'cache-control': 'no-store',
+  });
+  createReadStream(file).pipe(res);
 });
 
 server.listen(port, '127.0.0.1', () => {
-  console.log('app/ is on http://localhost:' + port);
+  console.log(`app/ is on http://localhost:${port}`);
 });
