@@ -1,46 +1,63 @@
-// Progress storage for the GTA VI trophy tracker.
-// Real progress lives under one localStorage key; ?demo=1 uses a SEPARATE demo
-// key and never touches the real one, so screenshots can show seeded progress
-// without polluting a visitor's saved checklist.
+// state.js — progress storage for the GTA VI trophy tracker.
+// Real progress lives under 'gta6-trophy-guide-tracker:v1' in localStorage.
+// ?demo=1 uses a SEPARATE demo key and never touches the real one, so the
+// screenshots can show a seeded checklist without wiping anyone's progress.
 (function () {
   'use strict';
 
-  var REAL_KEY = 'gta6-trophy-guide-tracker:v1';
+  var KEY = 'gta6-trophy-guide-tracker:v1';
   var DEMO_KEY = 'gta6-trophy-guide-tracker:demo';
-  var params = new URLSearchParams(location.search);
-  var demo = params.get('demo') === '1';
-  var KEY = demo ? DEMO_KEY : REAL_KEY;
-  // A handful of early trophies, ticked in demo mode only.
   var DEMO_SEED = [2, 3, 4, 8, 19, 20, 21, 44];
 
-  function defaults() {
+  var params = new URLSearchParams(location.search);
+  var demo = params.get('demo') === '1';
+
+  function key() {
+    return demo ? DEMO_KEY : KEY;
+  }
+
+  function blankState() {
     return { earned: [], settings: { spoiler: false, hideEarned: false } };
   }
 
   function load(validIds) {
-    var state = defaults();
-    var raw = null;
-    try { raw = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { raw = null; }
-    if (raw && Array.isArray(raw.earned)) {
-      state.earned = raw.earned.filter(function (id) { return validIds.has(id); });
-      if (raw.settings && typeof raw.settings === 'object') {
-        state.settings.spoiler = !!raw.settings.spoiler;
-        state.settings.hideEarned = !!raw.settings.hideEarned;
+    var valid = {};
+    validIds.forEach(function (id) { valid[id] = true; });
+    var state = blankState();
+    try {
+      var raw = localStorage.getItem(key());
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed.earned)) {
+          state.earned = parsed.earned.filter(function (id) { return valid[id]; });
+        }
+        if (parsed && parsed.settings) {
+          state.settings.spoiler = !!parsed.settings.spoiler;
+          state.settings.hideEarned = !!parsed.settings.hideEarned;
+        }
+      } else if (demo) {
+        // First demo visit: seed the demo checklist so screenshots show progress.
+        state.earned = DEMO_SEED.filter(function (id) { return valid[id]; });
+        save(state);
       }
-    } else if (demo) {
-      state.earned = DEMO_SEED.slice();
+    } catch (e) {
+      // Corrupt or unavailable storage: start clean, never crash the page.
+      state = blankState();
     }
+    state.earned = state.earned.slice().sort(function (a, b) { return a - b; });
     return state;
   }
 
   function save(state) {
     try {
-      localStorage.setItem(KEY, JSON.stringify({
-        earned: state.earned,
+      localStorage.setItem(key(), JSON.stringify({
+        earned: state.earned.slice().sort(function (a, b) { return a - b; }),
         settings: state.settings,
         updated: new Date().toISOString()
       }));
-    } catch (e) { /* private mode etc. — the app still works in memory */ }
+    } catch (e) {
+      // Storage full or blocked (private mode): progress just won't persist.
+    }
   }
 
   function exportPayload(state) {
@@ -53,25 +70,43 @@
     };
   }
 
-  // Accepts this app's export, a bare id array, or the starter checklist's
-  // name array. Returns {earned, skipped} or throws on unparseable input.
+  // Accept three shapes: the app's own export, a bare id array, or a name
+  // array (the starter checklist's trophy names). Returns the earned ids
+  // sorted, how many entries were skipped, and the settings if present.
   function parseImport(text, trophies) {
-    var data = JSON.parse(text);
-    var list = Array.isArray(data) ? data : (data && Array.isArray(data.earned) ? data.earned : null);
-    if (!list) throw new Error('No "earned" array found in that JSON.');
-    var byId = new Map(trophies.map(function (t) { return [t.id, t]; }));
-    var byName = new Map(trophies.map(function (t) { return [t.name, t]; }));
+    var parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch (e) {
+      throw new Error('That is not valid JSON. Paste the app\'s export, a list of ids like [2,3,8], or a list of names like ["Trust"].');
+    }
+    var list = null;
+    var settings = null;
+    if (parsed && Array.isArray(parsed.earned)) {
+      list = parsed.earned;
+      if (parsed.settings) settings = parsed.settings;
+    } else if (Array.isArray(parsed)) {
+      list = parsed;
+    }
+    if (!list) {
+      throw new Error('No "earned" array found in that JSON.');
+    }
+    var byId = {};
+    var byName = {};
+    trophies.forEach(function (t) {
+      byId[t.id] = true;
+      byName[t.name.toLowerCase()] = t.id;
+    });
     var earned = [];
     var skipped = 0;
     list.forEach(function (entry) {
-      var t = typeof entry === 'number' ? byId.get(entry) : byName.get(String(entry));
-      if (t) { if (earned.indexOf(t.id) === -1) earned.push(t.id); }
-      else skipped++;
+      var id = null;
+      if (typeof entry === 'number' && byId[entry]) id = entry;
+      else if (typeof entry === 'string' && byName[entry.toLowerCase()] !== undefined) id = byName[entry.toLowerCase()];
+      if (id === null) { skipped++; return; }
+      if (earned.indexOf(id) === -1) earned.push(id);
     });
     earned.sort(function (a, b) { return a - b; });
-    var settings = (data && !Array.isArray(data) && data.settings && typeof data.settings === 'object')
-      ? { spoiler: !!data.settings.spoiler, hideEarned: !!data.settings.hideEarned }
-      : null;
     return { earned: earned, skipped: skipped, settings: settings };
   }
 
